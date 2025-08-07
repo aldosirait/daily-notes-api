@@ -9,6 +9,7 @@ import (
 	"daily-notes-api/internal/middleware"
 	"daily-notes-api/internal/repository"
 	"daily-notes-api/pkg/auth"
+	"daily-notes-api/pkg/email"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,28 +27,33 @@ func main() {
 
 	// Initialize JWT manager
 	jwtManager := auth.NewJWTManager(cfg)
+	// Initialize Email service
+	var emailService *email.EmailService
+	if cfg.SMTPUsername != "" && cfg.SMTPPassword != "" {
+		emailService = email.NewEmailService(cfg)
+		log.Printf("Email service initialized with SMTP host: %s", cfg.SMTPHost)
+	} else {
+		log.Printf("Warning: SMTP credentials not provided, email functionality disabled")
+	}
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
 	noteRepo := repository.NewNoteRepository(db)
 
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(userRepo, jwtManager)
+	authHandler := handlers.NewAuthHandler(userRepo, jwtManager, emailService, cfg.AppName, cfg.AppURL)
 	noteHandler := handlers.NewNoteHandler(noteRepo)
 
 	// Setup Gin router
 	r := gin.New()
 
-	// Add global middleware
+	// Add middleware
 	r.Use(middleware.Logger())
 	r.Use(middleware.CORS())
 	r.Use(middleware.ErrorHandler())
 	r.Use(gin.Recovery())
 
-	// Add general rate limiting for all routes (optional)
-	// r.Use(middleware.NewGeneralRateLimit())
-
-	// Health check endpoint (no rate limiting needed)
+	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":  "ok",
@@ -58,12 +64,12 @@ func main() {
 	// Public API routes (no authentication required)
 	api := r.Group("/api/v1")
 	{
-		// Authentication routes with rate limiting
+		// Authentication routes
 		auth := api.Group("/auth")
-		auth.Use(middleware.AuthRateLimit()) // Apply rate limiting to auth routes
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
+			auth.POST("/test-email", authHandler.TestEmail)
 		}
 	}
 
@@ -95,7 +101,6 @@ func main() {
 
 	// Start server
 	log.Printf("Server starting on port %s", cfg.ServerPort)
-	log.Printf("Rate limiting: 5 auth requests per 15 minutes per IP")
 	if err := r.Run(":" + cfg.ServerPort); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}

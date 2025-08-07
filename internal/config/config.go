@@ -25,6 +25,15 @@ type Config struct {
 	AuthRateCleanup   time.Duration // cleanup interval
 	GeneralRateLimit  int           // general API rate limit
 	GeneralRateWindow time.Duration // general API time window
+
+	// SMTP Email configuration
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	AppName      string
+	AppURL       string
 }
 
 func LoadConfig() *Config {
@@ -42,6 +51,9 @@ func LoadConfig() *Config {
 	generalRateLimit, _ := strconv.Atoi(getEnv("GENERAL_RATE_LIMIT", "100"))
 	generalRateWindowMinutes, _ := strconv.Atoi(getEnv("GENERAL_RATE_WINDOW_MINUTES", "1"))
 
+	// SMTP configuration
+	smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "587"))
+
 	return &Config{
 		DBHost:         getEnv("DB_HOST", "localhost"),
 		DBPort:         getEnv("DB_PORT", "3306"),
@@ -58,6 +70,15 @@ func LoadConfig() *Config {
 		AuthRateCleanup:   time.Duration(authRateCleanupMinutes) * time.Minute,
 		GeneralRateLimit:  generalRateLimit,
 		GeneralRateWindow: time.Duration(generalRateWindowMinutes) * time.Minute,
+
+		// SMTP Email settings
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     smtpPort,
+		SMTPUsername: getEnv("SMTP_USERNAME", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
+		AppName:      getEnv("APP_NAME", "Daily Notes"),
+		AppURL:       getEnv("APP_URL", "http://localhost:3000"),
 	}
 }
 

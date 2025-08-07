@@ -1,25 +1,33 @@
 package handlers
 
 import (
+	"log"
 	"strings"
 
 	"daily-notes-api/internal/models"
 	"daily-notes-api/internal/repository"
 	"daily-notes-api/pkg/auth"
+	"daily-notes-api/pkg/email"
 	"daily-notes-api/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
-	userRepo   repository.UserRepository
-	jwtManager *auth.JWTManager
+	userRepo     repository.UserRepository
+	jwtManager   *auth.JWTManager
+	emailService *email.EmailService
+	appName      string
+	appURL       string
 }
 
-func NewAuthHandler(userRepo repository.UserRepository, jwtManager *auth.JWTManager) *AuthHandler {
+func NewAuthHandler(userRepo repository.UserRepository, jwtManager *auth.JWTManager, emailService *email.EmailService, appName, appURL string) *AuthHandler {
 	return &AuthHandler{
-		userRepo:   userRepo,
-		jwtManager: jwtManager,
+		userRepo:     userRepo,
+		jwtManager:   jwtManager,
+		emailService: emailService,
+		appName:      appName,
+		appURL:       appURL,
 	}
 }
 
@@ -93,6 +101,25 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		response.InternalServerError(c, "Failed to generate token")
 		return
 	}
+
+	// Send welcome email asynchronously
+	go func() {
+		if h.emailService != nil {
+			welcomeData := email.WelcomeEmailData{
+				UserName: user.FullName,
+				Email:    user.Email,
+				AppName:  h.appName,
+				AppURL:   h.appURL,
+			}
+
+			if err := h.emailService.SendWelcomeEmail(welcomeData); err != nil {
+				log.Printf("Failed to send welcome email to %s: %v", user.Email, err)
+				// Don't fail the registration if email fails
+			} else {
+				log.Printf("Welcome email sent successfully to %s", user.Email)
+			}
+		}
+	}()
 
 	loginResponse := &models.LoginResponse{
 		User:  user.ToResponse(),
@@ -272,4 +299,30 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Password changed successfully"})
+}
+
+// TestEmailEndpoint - Optional endpoint for testing email functionality
+func (h *AuthHandler) TestEmail(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ValidationErrors(c, err)
+		return
+	}
+
+	if h.emailService == nil {
+		response.InternalServerError(c, "Email service not configured")
+		return
+	}
+
+	// Send test email
+	if err := h.emailService.SendTestEmail(req.Email); err != nil {
+		log.Printf("Failed to send test email: %v", err)
+		response.InternalServerError(c, "Failed to send test email")
+		return
+	}
+
+	response.Success(c, gin.H{"message": "Test email sent successfully"})
 }

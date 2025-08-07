@@ -12,11 +12,11 @@ import (
 )
 
 type Response struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
-	Meta    interface{} `json:"meta,omitempty"`
-	Errors  interface{} `json:"errors,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Data    any    `json:"data,omitempty"`
+	Meta    any    `json:"meta,omitempty"`
+	Errors  any    `json:"errors,omitempty"`
 }
 
 type PaginationMeta struct {
@@ -147,9 +147,10 @@ func ValidationErrors(c *gin.Context, err error) {
 				}
 
 				message := "Invalid data type"
-				if expectedType == "string" {
+				switch expectedType {
+				case "string":
 					message = "This field must be a text value (string), not a number"
-				} else if expectedType == "number" {
+				case "number":
 					message = "This field must be a number, not text"
 				}
 
