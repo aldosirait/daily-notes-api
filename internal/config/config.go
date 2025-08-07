@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -17,6 +18,13 @@ type Config struct {
 	ServerPort     string
 	JWTSecret      string
 	JWTExpiryHours int
+
+	// Rate limiting configuration
+	AuthRateLimit     int           // requests per window
+	AuthRateWindow    time.Duration // time window
+	AuthRateCleanup   time.Duration // cleanup interval
+	GeneralRateLimit  int           // general API rate limit
+	GeneralRateWindow time.Duration // general API time window
 }
 
 func LoadConfig() *Config {
@@ -25,6 +33,14 @@ func LoadConfig() *Config {
 	}
 
 	jwtExpiryHours, _ := strconv.Atoi(getEnv("JWT_EXPIRY_HOURS", "24"))
+
+	// Rate limiting configuration
+	authRateLimit, _ := strconv.Atoi(getEnv("AUTH_RATE_LIMIT", "5"))
+	authRateWindowMinutes, _ := strconv.Atoi(getEnv("AUTH_RATE_WINDOW_MINUTES", "15"))
+	authRateCleanupMinutes, _ := strconv.Atoi(getEnv("AUTH_RATE_CLEANUP_MINUTES", "30"))
+
+	generalRateLimit, _ := strconv.Atoi(getEnv("GENERAL_RATE_LIMIT", "100"))
+	generalRateWindowMinutes, _ := strconv.Atoi(getEnv("GENERAL_RATE_WINDOW_MINUTES", "1"))
 
 	return &Config{
 		DBHost:         getEnv("DB_HOST", "localhost"),
@@ -35,6 +51,13 @@ func LoadConfig() *Config {
 		ServerPort:     getEnv("SERVER_PORT", "8080"),
 		JWTSecret:      getEnv("JWT_SECRET", "default-secret-change-this"),
 		JWTExpiryHours: jwtExpiryHours,
+
+		// Rate limiting
+		AuthRateLimit:     authRateLimit,
+		AuthRateWindow:    time.Duration(authRateWindowMinutes) * time.Minute,
+		AuthRateCleanup:   time.Duration(authRateCleanupMinutes) * time.Minute,
+		GeneralRateLimit:  generalRateLimit,
+		GeneralRateWindow: time.Duration(generalRateWindowMinutes) * time.Minute,
 	}
 }
 

@@ -38,13 +38,16 @@ func main() {
 	// Setup Gin router
 	r := gin.New()
 
-	// Add middleware
+	// Add global middleware
 	r.Use(middleware.Logger())
 	r.Use(middleware.CORS())
 	r.Use(middleware.ErrorHandler())
 	r.Use(gin.Recovery())
 
-	// Health check endpoint
+	// Add general rate limiting for all routes (optional)
+	// r.Use(middleware.NewGeneralRateLimit())
+
+	// Health check endpoint (no rate limiting needed)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":  "ok",
@@ -55,8 +58,9 @@ func main() {
 	// Public API routes (no authentication required)
 	api := r.Group("/api/v1")
 	{
-		// Authentication routes
+		// Authentication routes with rate limiting
 		auth := api.Group("/auth")
+		auth.Use(middleware.AuthRateLimit()) // Apply rate limiting to auth routes
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
@@ -91,6 +95,7 @@ func main() {
 
 	// Start server
 	log.Printf("Server starting on port %s", cfg.ServerPort)
+	log.Printf("Rate limiting: 5 auth requests per 15 minutes per IP")
 	if err := r.Run(":" + cfg.ServerPort); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}

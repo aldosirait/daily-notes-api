@@ -26,14 +26,37 @@ func NewAuthHandler(userRepo repository.UserRepository, jwtManager *auth.JWTMana
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body: "+err.Error())
+		response.ValidationErrors(c, err)
 		return
 	}
 
-	// Validate input
+	// Validate and clean input
 	req.Username = strings.TrimSpace(req.Username)
 	req.Email = strings.TrimSpace(req.Email)
 	req.FullName = strings.TrimSpace(req.FullName)
+
+	// Additional custom validation
+	var validationErrors []response.ValidationError
+
+	if len(req.Username) < 3 {
+		validationErrors = append(validationErrors, response.ValidationError{
+			Field:   "username",
+			Message: "Username must be at least 3 characters long",
+			Value:   req.Username,
+		})
+	}
+
+	if len(req.Password) < 6 {
+		validationErrors = append(validationErrors, response.ValidationError{
+			Field:   "password",
+			Message: "Password must be at least 6 characters long",
+		})
+	}
+
+	if len(validationErrors) > 0 {
+		response.ValidationErrorsResponse(c, validationErrors)
+		return
+	}
 
 	// Check if username already exists
 	exists, err := h.userRepo.UsernameExists(req.Username)
@@ -82,7 +105,24 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req models.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body: "+err.Error())
+		response.ValidationErrors(c, err)
+		return
+	}
+
+	// Additional validation for empty fields
+	if strings.TrimSpace(req.Username) == "" {
+		response.ValidationErrorResponse(c, response.ValidationError{
+			Field:   "username",
+			Message: "Username is required and cannot be empty",
+		})
+		return
+	}
+
+	if strings.TrimSpace(req.Password) == "" {
+		response.ValidationErrorResponse(c, response.ValidationError{
+			Field:   "password",
+			Message: "Password is required and cannot be empty",
+		})
 		return
 	}
 
@@ -153,7 +193,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body: "+err.Error())
+		response.ValidationErrors(c, err)
 		return
 	}
 
@@ -195,7 +235,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body: "+err.Error())
+		response.ValidationErrors(c, err)
 		return
 	}
 

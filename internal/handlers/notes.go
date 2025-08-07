@@ -28,7 +28,7 @@ func (h *NoteHandler) CreateNote(c *gin.Context) {
 
 	var req models.CreateNoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body: "+err.Error())
+		response.ValidationErrors(c, err)
 		return
 	}
 
@@ -51,7 +51,11 @@ func (h *NoteHandler) GetNote(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid note ID")
+		response.ValidationErrorResponse(c, response.ValidationError{
+			Field:   "id",
+			Message: "Note ID must be a valid number",
+			Value:   idStr,
+		})
 		return
 	}
 
@@ -78,11 +82,13 @@ func (h *NoteHandler) GetNotes(c *gin.Context) {
 
 	var filter models.NotesFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
-		response.BadRequest(c, "Invalid query parameters: "+err.Error())
+		response.ValidationErrors(c, err)
 		return
 	}
 
-	// Manual validation dan set default
+	// Manual validation with better error messages
+	var validationErrors []response.ValidationError
+
 	if filter.Page <= 0 {
 		filter.Page = 1
 	}
@@ -90,7 +96,16 @@ func (h *NoteHandler) GetNotes(c *gin.Context) {
 		filter.Limit = 10
 	}
 	if filter.Limit > 100 {
-		filter.Limit = 100
+		validationErrors = append(validationErrors, response.ValidationError{
+			Field:   "limit",
+			Message: "Limit cannot exceed 100 items per page",
+			Value:   strconv.Itoa(filter.Limit),
+		})
+	}
+
+	if len(validationErrors) > 0 {
+		response.ValidationErrorsResponse(c, validationErrors)
+		return
 	}
 
 	notes, total, err := h.noteRepo.GetAll(userID, &filter)
@@ -113,13 +128,17 @@ func (h *NoteHandler) UpdateNote(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid note ID")
+		response.ValidationErrorResponse(c, response.ValidationError{
+			Field:   "id",
+			Message: "Note ID must be a valid number",
+			Value:   idStr,
+		})
 		return
 	}
 
 	var req models.UpdateNoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body: "+err.Error())
+		response.ValidationErrors(c, err)
 		return
 	}
 
@@ -147,7 +166,11 @@ func (h *NoteHandler) DeleteNote(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid note ID")
+		response.ValidationErrorResponse(c, response.ValidationError{
+			Field:   "id",
+			Message: "Note ID must be a valid number",
+			Value:   idStr,
+		})
 		return
 	}
 
