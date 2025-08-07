@@ -50,8 +50,7 @@ migrate -path migrations -database "mysql://root@tcp(localhost:3306)/daily_notes
 ##  Menjalankan Aplikasi
 
 ```bash
-cd cmd/server
-go run main.go
+go run cmd/server/main.go
 ```
 
 Secara default server akan berjalan di `http://localhost:8080`.
