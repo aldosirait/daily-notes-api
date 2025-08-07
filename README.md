@@ -40,19 +40,12 @@ Salin file konfigurasi lingkungan `.env.example` ke `.env` dan sesuaikan variabe
 
 ##  Migrasi Database
 
-File migrasi tersedia di folder `migrations/`. Untuk menjalankan migrasi (contohnya PostgreSQL), kamu bisa menggunakan:
+File migrasi tersedia di folder `migrations/`. Untuk menjalankan migrasi, kamu bisa menggunakan:
 
 ```bash
-psql -h $DB_HOST -U $DB_USER -d $DB_NAME < migrations/001_create_notes_table.sql
+migrate -path migrations -database "mysql://root@tcp(localhost:3306)/daily_notes" up
 ```
 
-Jika ingin otomatisasi migrasi, kamu bisa gunakan tool seperti [`golang-migrate/migrate`](https://github.com/golang-migrate/migrate):
-
-```bash
-go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-
-migrate -path migrations -database "${DATABASE_URL}" up
-```
 
 ##  Menjalankan Aplikasi
 
@@ -73,43 +66,11 @@ Secara default server akan berjalan di `http://localhost:8080`.
 | PUT    | `/notes/:id`     | Update note berdasarkan ID       |
 | DELETE | `/notes/:id`     | Hapus note berdasarkan ID        |
 
-##  Struktur Model (contoh `pkg/model/note.go`)
 
-```go
-type Note struct {
-  ID        int       `json:"id" db:"id"`
-  Title     string    `json:"title" db:"title"`
-  Content   string    `json:"content" db:"content"`
-  CreatedAt time.Time `json:"created_at" db:"created_at"`
-  UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
-}
-```
-
-##  Contoh Handler (Gin)
-
-```go
-router.POST("/notes", func(c *gin.Context) {
-  var req CreateNoteRequest
-  if err := c.ShouldBindJSON(&req); err != nil {
-    c.JSON(400, gin.H{"error": err.Error()})
-    return
-  }
-  // simpan ke DB dan respon 201 ...
-})
-```
-
-##  Tips & Rekomendasi
-
-- Gunakan Gin untuk routing & middleware (logging, recovery, auth, dsb.)
-- Pertimbangkan struct `Request` khusus untuk validasi input
-- Layered architecture: pisahkan `handlers`, `services/usecases`, `repositories`
-- Error handling yang konsisten dan logging
-- Tambahkan testing: unit & integration (terutama untuk handler & service)
 
 ##  TODO Selanjutnya
 
-- Integrasi JWT untuk authentication
-- Middleware untuk auth & rate limiting
-- Dockerize aplikasimu (Dockerfile + docker-compose)
-- CI/CD pipeline (GitHub Actions)
-- Unit tests (handler & service), integration tests dengan database temporary
+- Penerapan Rate Limiting
+- Implementasi Cache Redis
+- Penerapan RDBAC
+- Testing
