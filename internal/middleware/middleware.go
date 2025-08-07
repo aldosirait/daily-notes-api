@@ -1,11 +1,16 @@
 package middleware
 
 import (
+	"context"
+	"crypto/md5"
+	"daily-notes-api/pkg/cache"
+	"daily-notes-api/pkg/response"
+	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"strconv"
-	"sync"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,185 +60,126 @@ func ErrorHandler() gin.HandlerFunc {
 	}
 }
 
-// RateLimiter represents a rate limiter for specific operations
-type RateLimiter struct {
-	visitors map[string]*Visitor
-	mutex    sync.RWMutex
-	rate     int           // requests per window
-	window   time.Duration // time window
-	cleanup  time.Duration // cleanup interval
-}
-
-// Visitor represents a visitor with their request history
-type Visitor struct {
-	requests []time.Time
-	lastSeen time.Time
-	mutex    sync.RWMutex
-}
-
-// NewRateLimiter creates a new rate limiter
-// rate: number of requests allowed per window
-// window: time window duration
-// cleanup: cleanup interval for old visitors
-func NewRateLimiter(rate int, window, cleanup time.Duration) *RateLimiter {
-	rl := &RateLimiter{
-		visitors: make(map[string]*Visitor),
-		rate:     rate,
-		window:   window,
-		cleanup:  cleanup,
-	}
-
-	// Start cleanup goroutine
-	go rl.cleanupVisitors()
-
-	return rl
-}
-
-// cleanupVisitors removes old visitors to prevent memory leaks
-func (rl *RateLimiter) cleanupVisitors() {
-	ticker := time.NewTicker(rl.cleanup)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		rl.mutex.Lock()
-		cutoff := time.Now().Add(-rl.cleanup)
-		for ip, visitor := range rl.visitors {
-			visitor.mutex.RLock()
-			lastSeen := visitor.lastSeen
-			visitor.mutex.RUnlock()
-
-			if lastSeen.Before(cutoff) {
-				delete(rl.visitors, ip)
-			}
-		}
-		rl.mutex.Unlock()
-	}
-}
-
-// isAllowed checks if a request from the given IP is allowed
-func (rl *RateLimiter) isAllowed(ip string) (bool, int, time.Duration) {
-	rl.mutex.RLock()
-	visitor, exists := rl.visitors[ip]
-	rl.mutex.RUnlock()
-
-	if !exists {
-		visitor = &Visitor{
-			requests: make([]time.Time, 0),
-			lastSeen: time.Now(),
-		}
-		rl.mutex.Lock()
-		rl.visitors[ip] = visitor
-		rl.mutex.Unlock()
-	}
-
-	visitor.mutex.Lock()
-	defer visitor.mutex.Unlock()
-
-	now := time.Now()
-	visitor.lastSeen = now
-
-	// Remove requests outside the window
-	cutoff := now.Add(-rl.window)
-	validRequests := visitor.requests[:0]
-	for _, reqTime := range visitor.requests {
-		if reqTime.After(cutoff) {
-			validRequests = append(validRequests, reqTime)
-		}
-	}
-	visitor.requests = validRequests
-
-	// Check if limit is exceeded
-	if len(visitor.requests) >= rl.rate {
-		// Calculate reset time (when the oldest request expires)
-		oldestRequest := visitor.requests[0]
-		resetTime := oldestRequest.Add(rl.window)
-		resetDuration := time.Until(resetTime)
-
-		return false, rl.rate - len(visitor.requests), resetDuration
-	}
-
-	// Add current request
-	visitor.requests = append(visitor.requests, now)
-	remaining := rl.rate - len(visitor.requests)
-
-	return true, remaining, 0
-}
-
-// RateLimitMiddleware creates a rate limiting middleware
-func RateLimitMiddleware(rateLimiter *RateLimiter) gin.HandlerFunc {
+// CacheMiddleware creates a middleware for caching GET requests
+func CacheMiddleware(cacheService *cache.CacheService, ttl time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := getClientIP(c)
-		allowed, remaining, resetDuration := rateLimiter.isAllowed(ip)
-
-		// Set rate limit headers
-		c.Header("X-RateLimit-Limit", strconv.Itoa(rateLimiter.rate))
-		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
-
-		if resetDuration > 0 {
-			c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(resetDuration).Unix(), 10))
-			c.Header("Retry-After", strconv.Itoa(int(resetDuration.Seconds())))
+		// Only cache GET requests
+		if c.Request.Method != "GET" || cacheService == nil {
+			c.Next()
+			return
 		}
 
-		if !allowed {
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"success":     false,
-				"message":     fmt.Sprintf("Rate limit exceeded. Try again in %v", resetDuration.Round(time.Second)),
-				"retry_after": int(resetDuration.Seconds()),
-			})
+		// Generate cache key based on path, query params, and user ID
+		cacheKey := generateCacheKey(c)
+		if cacheKey == "" {
+			c.Next()
+			return
+		}
+
+		// Try to get from cache
+		ctx, cancel := context.WithTimeout(c, 5*time.Second)
+		defer cancel()
+
+		var cachedResponse response.Response
+		err := cacheService.Get(ctx, cacheKey, &cachedResponse)
+		if err == nil {
+			log.Printf("Cache hit: %s", cacheKey)
+			c.JSON(200, cachedResponse)
 			c.Abort()
 			return
 		}
 
+		// Create a custom response writer to capture the response
+		writer := &responseWriter{
+			ResponseWriter: c.Writer,
+			body:           make([]byte, 0),
+		}
+		c.Writer = writer
+
+		// Process the request
 		c.Next()
+
+		// Cache successful responses
+		if c.Writer.Status() == 200 && len(writer.body) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			// Parse the response to cache it
+			var resp response.Response
+			if err := json.Unmarshal(writer.body, &resp); err == nil {
+				if err := cacheService.Set(ctx, cacheKey, resp, ttl); err != nil {
+					log.Printf("Failed to cache response: %v", err)
+				} else {
+					log.Printf("Cached response: %s", cacheKey)
+				}
+			}
+		}
 	}
 }
 
-// getClientIP extracts the real client IP from the request
-func getClientIP(c *gin.Context) string {
-	// Check X-Forwarded-For header first (for proxies/load balancers)
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs, take the first one
-		if idx := len(xff); idx > 0 {
-			if commaIdx := 0; commaIdx < idx {
-				for i, char := range xff {
-					if char == ',' {
-						commaIdx = i
-						break
-					}
-				}
-				if commaIdx > 0 {
-					return xff[:commaIdx]
-				}
+// responseWriter wraps gin.ResponseWriter to capture response body
+type responseWriter struct {
+	gin.ResponseWriter
+	body []byte
+}
+
+func (w *responseWriter) Write(data []byte) (int, error) {
+	w.body = append(w.body, data...)
+	return w.ResponseWriter.Write(data)
+}
+
+// generateCacheKey creates a unique cache key based on request path, params, and user
+func generateCacheKey(c *gin.Context) string {
+	// Get user ID from context
+	userID, exists := c.Get(UserIDKey)
+	if !exists {
+		return "" // Don't cache non-authenticated requests
+	}
+
+	// Build base key with path and user ID
+	path := c.Request.URL.Path
+	keyParts := []string{
+		"api_cache",
+		path,
+		fmt.Sprintf("user:%v", userID),
+	}
+
+	// Add sorted query parameters for consistent keys
+	if len(c.Request.URL.RawQuery) > 0 {
+		params, _ := url.ParseQuery(c.Request.URL.RawQuery)
+		var sortedParams []string
+
+		for key, values := range params {
+			sort.Strings(values)
+			for _, value := range values {
+				sortedParams = append(sortedParams, fmt.Sprintf("%s:%s", key, value))
 			}
-			return xff
+		}
+
+		sort.Strings(sortedParams)
+		if len(sortedParams) > 0 {
+			keyParts = append(keyParts, strings.Join(sortedParams, ","))
 		}
 	}
 
-	// Check X-Real-IP header (for nginx proxy)
-	if xri := c.GetHeader("X-Real-IP"); xri != "" {
-		return xri
+	// Join and hash for consistent length
+	keyString := strings.Join(keyParts, ":")
+	hash := md5.Sum([]byte(keyString))
+	return fmt.Sprintf("cache:%x", hash)
+}
+
+// InvalidateCachePattern provides a helper to invalidate cache patterns
+func InvalidateCachePattern(cacheService *cache.CacheService, pattern string) {
+	if cacheService == nil {
+		return
 	}
 
-	// Fallback to remote address
-	return c.ClientIP()
-}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-// Global rate limiters for different endpoints
-var (
-	AuthRateLimiter *RateLimiter
-	once            sync.Once
-)
-
-// InitRateLimiters initializes the rate limiters
-func InitRateLimiters() {
-	once.Do(func() {
-		// Allow 5 login/register attempts per 15 minutes per IP
-		AuthRateLimiter = NewRateLimiter(5, 15*time.Minute, 30*time.Minute)
-	})
-}
-
-// AuthRateLimit returns the rate limiting middleware for auth endpoints
-func AuthRateLimit() gin.HandlerFunc {
-	InitRateLimiters()
-	return RateLimitMiddleware(AuthRateLimiter)
+	if err := cacheService.DeletePattern(ctx, pattern); err != nil {
+		log.Printf("Failed to invalidate cache pattern %s: %v", pattern, err)
+	} else {
+		log.Printf("Invalidated cache pattern: %s", pattern)
+	}
 }

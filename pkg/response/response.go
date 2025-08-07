@@ -44,7 +44,7 @@ func Success(c *gin.Context, data interface{}) {
 	})
 }
 
-func SuccessWithMeta(c *gin.Context, data interface{}, meta interface{}) {
+func SuccessWithMeta(c *gin.Context, data any, meta any) {
 	c.JSON(http.StatusOK, Response{
 		Success: true,
 		Data:    data,

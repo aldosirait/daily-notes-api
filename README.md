@@ -64,12 +64,11 @@ Secara default server akan berjalan di `http://localhost:8080`.
 | POST   | `/notes`         | Buat note baru                   |
 | PUT    | `/notes/:id`     | Update note berdasarkan ID       |
 | DELETE | `/notes/:id`     | Hapus note berdasarkan ID        |
+| CREATE | `/notes`         | buat notes                       |
 
 
 
 ##  TODO Selanjutnya
 
-- Penerapan Rate Limiting
-- Implementasi Cache Redis
 - Penerapan RDBAC
 - Testing

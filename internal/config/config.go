@@ -34,6 +34,14 @@ type Config struct {
 	SMTPFrom     string
 	AppName      string
 	AppURL       string
+
+	// Redis Cache configuration
+	RedisHost       string
+	RedisPort       string
+	RedisPassword   string
+	RedisDB         int
+	CacheEnabled    bool
+	CacheTTLMinutes int
 }
 
 func LoadConfig() *Config {
@@ -53,6 +61,11 @@ func LoadConfig() *Config {
 
 	// SMTP configuration
 	smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "587"))
+
+	// Redis configuration
+	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
+	cacheEnabled, _ := strconv.ParseBool(getEnv("CACHE_ENABLED", "true"))
+	cacheTTLMinutes, _ := strconv.Atoi(getEnv("CACHE_TTL_MINUTES", "30"))
 
 	return &Config{
 		DBHost:         getEnv("DB_HOST", "localhost"),
@@ -79,6 +92,14 @@ func LoadConfig() *Config {
 		SMTPFrom:     getEnv("SMTP_FROM", ""),
 		AppName:      getEnv("APP_NAME", "Daily Notes"),
 		AppURL:       getEnv("APP_URL", "http://localhost:3000"),
+
+		// Redis Cache settings
+		RedisHost:       getEnv("REDIS_HOST", "localhost"),
+		RedisPort:       getEnv("REDIS_PORT", "6379"),
+		RedisPassword:   getEnv("REDIS_PASSWORD", ""),
+		RedisDB:         redisDB,
+		CacheEnabled:    cacheEnabled,
+		CacheTTLMinutes: cacheTTLMinutes,
 	}
 }
 

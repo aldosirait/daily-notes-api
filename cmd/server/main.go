@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"daily-notes-api/internal/config"
 	"daily-notes-api/internal/database"
@@ -9,6 +10,7 @@ import (
 	"daily-notes-api/internal/middleware"
 	"daily-notes-api/internal/repository"
 	"daily-notes-api/pkg/auth"
+	"daily-notes-api/pkg/cache"
 	"daily-notes-api/pkg/email"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +29,7 @@ func main() {
 
 	// Initialize JWT manager
 	jwtManager := auth.NewJWTManager(cfg)
+
 	// Initialize Email service
 	var emailService *email.EmailService
 	if cfg.SMTPUsername != "" && cfg.SMTPPassword != "" {
@@ -36,13 +39,40 @@ func main() {
 		log.Printf("Warning: SMTP credentials not provided, email functionality disabled")
 	}
 
+	// Initialize Cache service
+	var cacheService *cache.CacheService
+	if cfg.CacheEnabled {
+		cacheConfig := cache.CacheConfig{
+			Host:       cfg.RedisHost,
+			Port:       cfg.RedisPort,
+			Password:   cfg.RedisPassword,
+			DB:         cfg.RedisDB,
+			DefaultTTL: time.Duration(cfg.CacheTTLMinutes) * time.Minute,
+		}
+
+		cacheService = cache.NewCacheService(cacheConfig)
+		if cacheService != nil {
+			log.Printf("Cache service initialized with Redis at %s:%s", cfg.RedisHost, cfg.RedisPort)
+			// Ensure cache is properly closed on application exit
+			defer func() {
+				if err := cacheService.Close(); err != nil {
+					log.Printf("Failed to close cache service: %v", err)
+				}
+			}()
+		} else {
+			log.Printf("Warning: Cache service failed to initialize, running without cache")
+		}
+	} else {
+		log.Printf("Cache service disabled via configuration")
+	}
+
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
 	noteRepo := repository.NewNoteRepository(db)
 
-	// Initialize handlers
+	// Initialize handlers (pass cache service to note handler)
 	authHandler := handlers.NewAuthHandler(userRepo, jwtManager, emailService, cfg.AppName, cfg.AppURL)
-	noteHandler := handlers.NewNoteHandler(noteRepo)
+	noteHandler := handlers.NewNoteHandler(noteRepo, cacheService)
 
 	// Setup Gin router
 	r := gin.New()
@@ -53,12 +83,25 @@ func main() {
 	r.Use(middleware.ErrorHandler())
 	r.Use(gin.Recovery())
 
-	// Health check endpoint
+	// Health check endpoint (include cache status)
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
+		healthData := gin.H{
 			"status":  "ok",
 			"service": "daily-notes-api",
-		})
+			"cache":   "disabled",
+		}
+
+		// Check cache health if enabled
+		if cacheService != nil {
+			if err := cacheService.Health(c); err != nil {
+				healthData["cache"] = "error"
+				healthData["cache_error"] = err.Error()
+			} else {
+				healthData["cache"] = "healthy"
+			}
+		}
+
+		c.JSON(200, healthData)
 	})
 
 	// Public API routes (no authentication required)
